@@ -2,6 +2,7 @@
 Entry point of TableOfHours
 """
 
+import calendar_assets
 import datetime
 
 
@@ -37,6 +38,7 @@ def main():
     print("Good {0}, {1}.".format(part_of_day, username))
     print(dt.strftime("Today is %A, %B %d %Y."))
     print("Your schedule for the day is:")
+    calendar_assets.list_daily_events()
 
 
 if __name__ == '__main__':
