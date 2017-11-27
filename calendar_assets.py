@@ -3,52 +3,16 @@ Classes for things that go on your calendar,
 e.g. Events, Tasks, Errands, and Goals.
 """
 
-import httplib2
-from oauth2client.client import flow_from_clientsecrets
-from oauth2client.file import Storage
-
-from apiclient import discovery
 import datetime
-
-# If modifying these scopes, delete your previously saved credentials
-# at ~/.credentials/calendar-python-quickstart.json
-SCOPES = 'https://www.googleapis.com/auth/calendar.readonly'
-CLIENT_SECRET_FILE = 'client_secret.json'
-APPLICATION_NAME = 'Table Of Hours'
-
 
 def get_timezone_string():
     now = datetime.datetime.now()
     utc_now = datetime.datetime.utcnow()
     timezone = utc_now.hour - now.hour
+    if timezone < 0:
+        timezone += 24
     timezone_string = '-0{0}00'.format(str(timezone))
     return timezone_string
-
-
-def get_credentials():
-    """Gets valid user credentials from storage.
-
-    If nothing has been stored, or if the stored credentials are invalid,
-    the OAuth2 flow is completed to obtain the new credentials.
-
-    Returns:
-        Credentials, the obtained credential.
-    """
-    storage = Storage('my_credentials')
-
-    if not storage.get():
-
-        flow = flow_from_clientsecrets('client_secrets.json',
-                                       scope='https://www.googleapis.com/auth/calendar',
-                                       redirect_uri='http://localhost')
-        auth_uri = flow.step1_get_authorize_url()
-        print("Go here: " + auth_uri)
-        code = input("Enter code from authorization flow.")
-        credentials = flow.step2_exchange(code)
-        storage.put(credentials)
-    else:
-        credentials = storage.get()
-    return credentials
 
 
 def event_to_datetime_from_start(event):
@@ -116,8 +80,46 @@ def get_end_of_day_string():
     utc_now = datetime.datetime.utcnow()
     # TODO: fix that this only works in single-digit timezones
     end_of_day = datetime.datetime(now.year, now.month, now.day, 23, 59, 59, 999999)
-    end_of_day_string = end_of_day.isoformat() + get_timezone_string()
+    end_of_day_string = datetime_to_google_string(end_of_day)
     return end_of_day_string
+
+
+def datetime_to_google_string(dt):
+    return dt.isoformat() + get_timezone_string()
+
+
+def new_event(service):
+    print("Creating new event.")
+    summary = input("Please enter the name/title of the event:")
+
+    start_date_raw = input("Please enter the date (or none to use today's date). The format is: 01/31/1970")
+    if start_date_raw == '':
+        start_date = datetime.date.today()
+    else:
+        start_date = datetime.datetime.strptime(start_date_raw, "%m/%d/%Y")
+    start_time_string = input("Please enter the start time in the format 11:59.")
+    start_time = datetime.datetime.strptime(start_time_string, "%H:%M")
+    start_dt = datetime.datetime.combine(start_date, start_time.time())
+
+    end_date_raw = input("Please enter the end date (or none to use today's date). The format is: 01/31/1970")
+    if end_date_raw == '':
+        end_date = datetime.date.today()
+    else:
+        end_date = datetime.datetime.strptime(end_date_raw, "%m/%d/%Y")
+    end_time_string = input("Please enter the end time in the format 11:59")
+    end_time = datetime.datetime.strptime(end_time_string, "%H:%M")
+    end_dt = datetime.datetime.combine(end_date, end_time.time())
+
+    location = input("Please enter the location of the event:")
+
+    # TODO: create valid Google Datetime format from supplied date and time
+    # TODO: Especially time
+    start = datetime_to_google_string(start_dt)
+    end = datetime_to_google_string(end_dt)
+    event = {'summary': summary, 'start': {'dateTime': start}, 'end': {'dateTime': end}, 'location': location}
+    event = service.events().insert(calendarId='primary', body=event).execute()
+
+    print('Event created: %s' % (event.get('htmlLink')))
 
 
 def bucket_timed_events(timed_events):
@@ -128,39 +130,33 @@ def bucket_timed_events(timed_events):
 
     for event in timed_events:
         dt = event_start_to_datetime(event['start'].get('dateTime', event['start'].get('date')))
-        if dt.hour in [0, 8]:
+        if dt.hour in range(0, 8):
             bucket = 0
-        if dt.hour in [9, 11]:
+        elif dt.hour in range(9, 11):
             bucket = 9
-        if dt.hour in [12, 14]:
+        elif dt.hour in range(12, 14):
             bucket = 12
-        if dt.hour in [15, 17]:
+        elif dt.hour in range(15, 17):
             bucket = 15
-        if dt.hour in [18, 20]:
+        elif dt.hour in range(18, 20):
             bucket = 18
-        if dt.hour in [21, 23]:
+        elif dt.hour in range(21, 23):
             bucket = 21
+        else:
+            bucket = 0
+
         buckets[bucket].append(event)
+
     return buckets
 
 
 def print_pretty_timed_events(timed_events):
-    MIN_ENTRIES = 3
-    MAX_ENTRIES = 6
-
     print('Schedule: ')
     day_buckets = bucket_timed_events(timed_events)
     max_bucket = day_buckets[list(day_buckets.keys())[0]]
     for bucket in day_buckets:
         if len(day_buckets[bucket]) > len(max_bucket):
             max_bucket = day_buckets[bucket]
-
-    if len(max_bucket) < MIN_ENTRIES:
-        number_of_entries = MIN_ENTRIES
-    elif MAX_ENTRIES < len(max_bucket):
-        number_of_entries = MAX_ENTRIES
-    else:
-        number_of_entries = len(max_bucket)
 
     for i in range(0, 23):
         if i in list(day_buckets.keys()):
@@ -175,15 +171,11 @@ def print_pretty_timed_events(timed_events):
             print('----')
 
 
-def list_daily_events():
+def list_daily_events(service):
     """
     Creates a Google Calendar API service object and outputs a list of the
     day's events on the user's calendar.
     """
-    # initialize GCal Service
-    credentials = get_credentials()
-    http = credentials.authorize(httplib2.Http())
-    service = discovery.build('calendar', 'v3', http=http)
 
     # now and end_of_day in GCal format
     now_string = datetime.datetime.now().isoformat() + get_timezone_string()
